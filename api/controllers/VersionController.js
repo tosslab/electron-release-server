@@ -224,8 +224,7 @@ module.exports = {
             return res.ok({
               url: url.resolve(
                 sails.config.appUrl,
-                '/download/' + latestVersion.name + '/' +
-                latestVersion.assets[0].platform + '?filetype=zip'
+                '/download/' + latestVersion.name + '/' + latestVersion.assets[0].name
               ),
               name: latestVersion.name,
               notes: releaseNotes,
@@ -349,8 +348,7 @@ module.exports = {
             assets = _.map(latestVersion.assets, function(asset) {
               asset.name = url.resolve(
                 sails.config.appUrl,
-                '/download/' + asset.version + '/' + asset.platform + '/' +
-                asset.name
+                '/download/' + asset.version + '/' + asset.name
               );
 
               return asset;
