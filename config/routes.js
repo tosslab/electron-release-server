@@ -40,6 +40,7 @@ module.exports.routes = {
   'GET /update/:platform/:channel/latest-mac.yml': 'VersionController.electronUpdaterMac',
   'GET /update/:platform/:version/RELEASES': 'VersionController.windows',
   'GET /update/:platform/:version/:channel/RELEASES': 'VersionController.windows',
+  'GET /update/:platform/:version/:channel/RELEASES/RELEASES': 'VersionController.windows',
   'GET /update/:platform/:version/:channel': 'VersionController.general',
   'GET /notes/:version?': 'VersionController.releaseNotes',
 
