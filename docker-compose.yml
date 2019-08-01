@@ -3,22 +3,29 @@ services:
   web:
     build: .
     environment:
-      APP_USERNAME: username
-      APP_PASSWORD: password
+      APP_USERNAME: toss
+      APP_PASSWORD: 'xhtmfoq@2323'
       DB_HOST: db
       DB_PORT: 5432
       DB_USERNAME: releaseserver
       DB_NAME: releaseserver
-      DB_PASSWORD: secret
-      TOKEN_SECRET: change_me_in_production
-      APP_URL: 'localhost:5000'
+      DB_PASSWORD: 'xhtmfoq2323'
+      TOKEN_SECRET: 'AWum7T0A4pgYP7lpChHHscbmxQNV2Nc5vIy23RgQ0ZZHAkB69cHAPdkNv7wLpxQ'
+      APP_URL: 'https://d1fxzwizdp8gty.cloudfront.net'
+      NODE_ENV: production
     depends_on:
       - db
     ports:
-      - '5000:80'
+      - '80:80'
+    volumes:
+      - '/var/opt/electron-release-server:/tmp'
     entrypoint: ./scripts/wait.sh db:5432 -- npm start
   db:
     image: postgres
     environment:
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD: 'xhtmfoq2323'
       POSTGRES_USER: releaseserver
+    ports:
+      - '5432:5432'
+    volumes:
+      - '/var/lib/postgresql/data:/var/lib/postgresql/data'
