@@ -9,29 +9,80 @@
  * http://sailsjs.org/#!/documentation/reference/sails.config/sails.config.bootstrap.html
  */
 
- const mapSeries = require('async/mapSeries');
- const waterfall = require('async/waterfall');
- const apply = require('async/apply');
+const mapSeries = require('async/mapSeries');
+const waterfall = require('async/waterfall');
+const series = require('async/series');
 
-module.exports.bootstrap = function(cb) {  
-  // Create configured channels in database
-  mapSeries(sails.config.channels, (name, next) => {
-    waterfall([
-      (next) => {
-        Channel.find({
-          name: name
-        }).exec(next);
-      },
-      (result, next) => {
-        if (result.length) {
-          return next();
+module.exports.bootstrap = done => {
+  series([
+
+    // Create configured channels in database
+    cb => mapSeries(sails.config.channels, (name, next) => {
+      waterfall([
+        next => {
+          Channel
+            .find(name)
+            .exec(next);
+        },
+        (result, next) => {
+          if (result.length) return next();
+
+          Channel
+            .create({ name })
+            .exec(next);
         }
+      ], next);
+    }, cb),
 
-        Channel.create({
-          name: name
-        })
-        .exec(next);
-      }
-    ], next);
-  }, cb);
+    // Populate existing versions without availability date using version creation date
+    cb => Version
+      .find({ availability: null })
+      .then(versions => mapSeries(
+        versions,
+        ({ id, createdAt }, next) => {
+          Version
+            .update(id, { availability: createdAt })
+            .exec(next)
+        },
+        cb
+      )),
+
+    // Create configured flavors in database
+    cb => mapSeries(sails.config.flavors, (name, next) => {
+      waterfall([
+        next => {
+          Flavor
+            .find(name)
+            .exec(next);
+        },
+        (result, next) => {
+          if (result.length) return next();
+
+          Flavor
+            .create({ name })
+            .exec(next);
+        }
+      ], next);
+    }, cb),
+
+    // Update existing versions and associated assets in database with default flavor data
+    cb => Version
+      .update(
+        { flavor: null },
+        { flavor: 'default' }
+      )
+      .exec((err, updatedVersions) => mapSeries(
+        updatedVersions,
+        ({ name, id }, next) => {
+          Asset
+            .update(
+              { version: name },
+              { version: id }
+            )
+            .exec(next)
+        },
+        cb
+      ))
+
+  ], done);
 };

@@ -21,7 +21,7 @@ services:
       - '/var/opt/electron-release-server:/tmp'
     entrypoint: ./scripts/wait.sh db:5432 -- npm start
   db:
-    image: postgres
+    image: postgres:11
     environment:
       POSTGRES_PASSWORD: 'xhtmfoq2323'
       POSTGRES_USER: releaseserver

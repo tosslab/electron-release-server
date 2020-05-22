@@ -10,16 +10,6 @@ var path = require('path');
 var actionUtil = require('sails/lib/hooks/blueprints/actionUtil');
 var Promise = require('bluebird');
 
-var SEGMENTS_TO_REMOVE = _.concat(_.pickBy(PlatformService, _.isString), [
-  'x64',
-  'ia32',
-  'x32',
-  'win32',
-  'windows',
-  'osx',
-  'linux'
-]);
-
 module.exports = {
 
   /**
@@ -32,12 +22,16 @@ module.exports = {
    * (GET /download/latest/:platform?': 'AssetController.download')
    * (GET /download/:version/:platform?/:filename?': 'AssetController.download')
    * (GET /download/channel/:channel/:platform?': 'AssetController.download')
+   * (GET /download/flavor/:flavor/latest/:platform?': 'AssetController.download')
+   * (GET /download/flavor/:flavor/:version/:platform?/:filename?': 'AssetController.download')
+   * (GET /download/flavor/:flavor/channel/:channel/:platform?': 'AssetController.download')
    */
   download: function(req, res) {
     var channel = req.params.channel;
     var version = req.params.version || undefined;
     var filename = req.params.filename;
     var filetype = req.query.filetype;
+    const flavor = req.params.flavor || 'default';
 
     // We accept multiple platforms (x64 implies x32)
     var platforms;
@@ -70,7 +64,7 @@ module.exports = {
       channel = channel || 'stable';
     }
 
-    var assetPromise = new Promise(function(resolve, reject) {
+    new Promise(function(resolve, reject) {
         var assetOptions = UtilityService.getTruthyObject({
           platform: platforms,
           filetype: filetype
@@ -82,7 +76,8 @@ module.exports = {
           Version
             .find(UtilityService.getTruthyObject({
               name: version,
-              channel: channel
+              channel: channel,
+              flavor
             }))
             .sort({
               createdAt: 'desc'
@@ -134,7 +129,7 @@ module.exports = {
       })
       .then(function(asset) {
         if (!asset || !asset.fd) {
-          var noneFoundMessage = 'No download available';
+          let noneFoundMessage = `The ${flavor} flavor has no download available`;
 
           if (platforms) {
             if (platforms.length > 1) {
@@ -145,7 +140,7 @@ module.exports = {
           }
 
           noneFoundMessage += version ? ' for version ' + version : '';
-          noneFoundMessage += ' (' + channel + ') ';
+          noneFoundMessage += channel ? ' (' + channel + ') ' : '';
           noneFoundMessage += filename ? ' with filename ' + filename : '';
           noneFoundMessage += filetype ? ' with filetype ' + filetype : '';
           return res.notFound(noneFoundMessage);
@@ -168,85 +163,98 @@ module.exports = {
     }
 
     if (_.isString(data.version)) {
-      // Only a name was provided, normalize
+      // Only a id was provided, normalize
       data.version = {
-        name: data.version
+        id: data.version
       };
-    } else if (_.isObjectLike(data.version) && _.has(data.version, 'name')) {
-      // Valid request, but we only want the name
+    } else if (data.version && data.version.id) {
+      // Valid request, but we only want the id
       data.version = {
-        name: data.version.name
+        id: data.version.id
       };
     } else {
       return res.badRequest('Invalid version provided.');
     }
 
-    // Set upload request timeout to 10 minutes
-    req.setTimeout(10 * 60 * 1000);
-
-    req.file('file').upload(sails.config.files,
-      function whenDone(err, uploadedFiles) {
-        if (err) {
-          return res.negotiate(err);
+    // Check that the version exists (or its `_default` flavor equivalent)
+    Version
+      .find({
+        id: [data.version.id, `${data.version.id}_default`]
+      })
+      .then(versions => {
+        if (!versions || !versions.length) {
+          return res.notFound('The specified `version` does not exist');
         }
 
-        // If an unexpected number of files were uploaded, respond with an
-        // error.
-        if (uploadedFiles.length !== 1) {
-          return res.badRequest('No file was uploaded');
-        }
+        data.version.id = versions[versions.length - 1].id;
 
-        var uploadedFile = uploadedFiles[0];
+        // Set upload request timeout to 10 minutes
+        req.setTimeout(10 * 60 * 1000);
 
-        var fileExt = path.extname(uploadedFile.filename);
+        req.file('file').upload(sails.config.files,
+          function whenDone(err, uploadedFiles) {
+            if (err) {
+              return res.negotiate(err);
+            }
 
-        sails.log.debug('Creating asset with name', uploadedFile.filename);
+            // If an unexpected number of files were uploaded, respond with an
+            // error.
+            if (uploadedFiles.length !== 1) {
+              return res.badRequest('No file was uploaded');
+            }
 
-        var hashPromise;
+            var uploadedFile = uploadedFiles[0];
 
-        if (fileExt === '.nupkg') {
-          // Calculate the hash of the file, as it is necessary for windows
-          // files
-          hashPromise = AssetService.getHash(uploadedFile.fd);
-        } else if (fileExt === '.exe' || fileExt === '.zip') {
-          hashPromise = AssetService.getHash(uploadedFile.fd, 'sha256');
-        } else {
-          hashPromise = Promise.resolve('');
-        }
+            var fileExt = path.extname(uploadedFile.filename);
 
-        hashPromise
-          .then(function(fileHash) {
-            // Create new instance of model using data from params
-            Asset
-              .create(_.merge({
-                name: uploadedFile.filename,
-                hash: fileHash,
-                filetype: fileExt,
-                fd: uploadedFile.fd,
-                size: uploadedFile.size
-              }, data))
-              .exec(function created(err, newInstance) {
+            sails.log.debug('Creating asset with name', data.name || uploadedFile.filename);
 
-                // Differentiate between waterline-originated validation errors
-                // and serious underlying issues. Respond with badRequest if a
-                // validation error is encountered, w/ validation info.
-                if (err) return res.negotiate(err);
+            var hashPromise;
 
-                // If we have the pubsub hook, use the model class's publish
-                // method to notify all subscribers about the created item.
-                if (req._sails.hooks.pubsub) {
-                  if (req.isSocket) {
-                    Asset.subscribe(req, newInstance);
-                    Asset.introduce(newInstance);
-                  }
-                  Asset.publishCreate(newInstance, !req.options.mirror && req);
-                }
+            if (fileExt === '.nupkg') {
+              // Calculate the hash of the file, as it is necessary for windows
+              // files
+              hashPromise = AssetService.getHash(uploadedFile.fd);
+            } else if (fileExt === '.exe' || fileExt === '.zip') {
+              hashPromise = AssetService.getHash(uploadedFile.fd, 'sha256');
+            } else {
+              hashPromise = Promise.resolve('');
+            }
 
-                // Send JSONP-friendly response if it's supported
-                res.created(newInstance);
-              });
-          })
-          .catch(res.negotiate);
+            hashPromise
+              .then(function(fileHash) {
+                // Create new instance of model using data from params
+                Asset
+                  .create(_.merge({
+                    name: uploadedFile.filename,
+                    hash: fileHash,
+                    filetype: fileExt,
+                    fd: uploadedFile.fd,
+                    size: uploadedFile.size
+                  }, data))
+                  .exec(function created(err, newInstance) {
+
+                    // Differentiate between waterline-originated validation errors
+                    // and serious underlying issues. Respond with badRequest if a
+                    // validation error is encountered, w/ validation info.
+                    if (err) return res.negotiate(err);
+
+                    // If we have the pubsub hook, use the model class's publish
+                    // method to notify all subscribers about the created item.
+                    if (req._sails.hooks.pubsub) {
+                      if (req.isSocket) {
+                        Asset.subscribe(req, newInstance);
+                        Asset.introduce(newInstance);
+                      }
+                      Asset.publishCreate(newInstance, !req.options.mirror && req);
+                    }
+
+                    // Send JSONP-friendly response if it's supported
+                    res.created(newInstance);
+                  });
+              })
+              .catch(res.negotiate);
+          });
       });
   },
 
